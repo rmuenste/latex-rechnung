@@ -1,9 +1,11 @@
 {
-    "invoiceDate": "20.09.2024",
+    "invoiceDate": "20.12.2024",
     "payDate": "DD.MM.YYYY",
-    "invoiceReference": "2023-09-2",
+    "invoiceReference": "2024-12-1",
     "invoiceSalutation": "Sehr geehrte Damen und Herren,",
     "invoiceText": "Für die von mir erbrachte Leistung erhalten Sie hiermit die Rechnung. Bitte überweisen Sie den genannten Betrag innerhalb von zwei Wochen auf das angegebene Konto.",
+    "invoiceServices": "Verbesserung des Simulationsassistenten durch Übersetzungstools und RAG-Komponenten",
+    "invoiceTimeSpan": "Dezember 2024",
     "invoiceEnclosures": "",
     "invoiceClosing": "Mit freundlichen Grüßen,",
     "customerCompany": "IANUS Simulation GmbH",

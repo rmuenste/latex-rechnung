@@ -47,10 +47,12 @@ def create_tex_file(data, invoice_folder):
         tex_file.write(r"""
 % ################## invoice DATA ##################
 \newcommand{\invoiceDate}{""" + data['invoiceDate'] + r"""} % Datum der Rechnungsstellung
+\newcommand{\invoiceTimeSpan}{""" + data['invoiceTimeSpan'] + r"""} % Datum der Rechnungsstellung
 \newcommand{\payDate}{""" + data['payDate'] + r"""} % Datum der Zahlungsfrist
 \newcommand{\invoiceReference}{""" + data['invoiceReference'] + r"""} % Rechnungsnummer
 \newcommand{\invoiceSalutation}{""" + data['invoiceSalutation'] + r"""} % Anrede
 \newcommand{\invoiceText}{""" + data['invoiceText'] + r"""} % Rechnungstext
+\newcommand{\invoiceServices}{""" + data['invoiceServices'] + r"""} % RechnungsLeistung
 \newcommand{\invoiceEnclosures}{""" + data['invoiceEnclosures'] + r"""} % Anlagen
 \newcommand{\invoiceClosing}{""" + data['invoiceClosing'] + r"""} % Schlusssatz
 % ################## invoice DATA ##################
