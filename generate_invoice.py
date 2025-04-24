@@ -2,10 +2,90 @@ import os
 import shutil
 import json
 import subprocess
+import logging
+import sys
 import argparse
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-def generate_invoice(json_file):
+# --- Constants ---
+TEMPLATE_DIR = "invoice_template"
+MAIN_TEX_FILE = "main_invoice.tex"
+DATA_TEX_FILE = "invoice_data.tex"
+DEFAULT_LATEX_COMMAND = "pdflatex"
+
+# --- LaTeX Sanitization ---
+# Basic LaTeX character escaping
+#==========================================================================    
+def sanitize_latex(text):
+    """Escape special LaTeX characters in a string."""
+    if not isinstance(text, str):
+        text = str(text) # Make sure this is a string
+    chars = {
+        '&': r'\&',
+        '%': r'\%',
+        '$': r'\$',
+        '#': r'\#',
+        '_': r'\_',
+        '{': r'\{',
+        '}': r'\}',
+        '~': r'\textasciitilde{}',
+        '^': r'\textasciicircum{}',
+        '\\': r'\textbackslash{}'
+    }
+
+    # Simple replace - adjust if more escaping is needed
+    for char, escaped in chars.items():
+        text.replace(char, escaped)
+
+    # Handle potential newlines - replace with LaTex newline or space
+    text = text.replace('\n', r'\\')
+    return text
+#==========================================================================    
+
+
+#==========================================================================    
+def create_tex_data_file(data, invoice_folder):
+    """Creates the invoice_data.tex file with sanitized data."""
+    tex_file_path = os.path.join(invoice_folder, DATA_TEX_FILE)
+    required_keys = [ # Define keys expected in the JSON
+        'invoiceDate', 'invoiceTimeSpan', 'payDate', 'invoiceReference',
+        'invoiceSalutation', 'invoiceText', 'invoiceServices', 'invoiceEnclosures',
+        'invoiceClosing', 'customerCompany', 'customerName', 'customerStreet',
+        'customerZIP', 'customerCity', 'taxID', 'senderName', 'senderStreet',
+        'senderZIP', 'senderCity', 'senderTelephone', 'senderMobilephone',
+        'senderEmail', 'senderWeb', 'accountRCPT', 'accountNumber',
+        'accountBLZ', 'accountBankName', 'accountIBAN', 'accountBIC'
+    ]    
+
+    missing_keys = [key for key in required_keys if key not in data]
+    if missing_keys:
+        logging.error(f"Missing required keys in JSON data: {', '.join(missing_keys)}")
+        raise ValueError("JSON data is missing required keys")
+
+    # Generate LaTeX commands using f-strings and sanitization
+    tex_content = r"% --- Generated Invoice Data ---" + "\n"
+    for key in required_keys:
+        value = data.get(key, '')
+        sanitized_value = sanitize_latex(value)
+        tex_content += f"\\newcommand{{\\{key}}}{{{sanitized_value}}}\n"
+    tex_content += r"% --- End Generated Invoice Data ---" + "\n"
+
+    try:
+        with open(tex_file_path, 'w', encoding='utf-8') as tex_file:
+            tex_file.write(tex_content)
+        logging.info(f"Created LaTeX data file: {tex_file_path}")
+    except IOError as e:
+        logging.error(f"Failed to write LaTex data file {tex_file_path}: {e}")
+        raise
+    
+#==========================================================================    
+
+
+#==========================================================================    
+def generate_invoice(json_file, force_overwrite=False,
+                     latex_cmd=DEFAULT_LATEX_COMMAND):
     # Lade die JSON-Daten
     with open(json_file, 'r') as f:
         data = json.load(f)
@@ -38,7 +118,10 @@ def generate_invoice(json_file):
     mainFileName = "main_invoice.tex"
     # Führe die Latex-Kompilation der main_invoice.tex im Rechnungsordner durch
     compile_latex(mainFileName, target_template_path, invoice_folder)
+#==========================================================================    
 
+
+#==========================================================================    
 def create_tex_file(data, invoice_folder):
     # Erstelle die .tex Datei für die Rechnungsdaten im Rechnungsordner
     tex_file_path = os.path.join(invoice_folder, "invoice_data.tex")
@@ -90,7 +173,10 @@ def create_tex_file(data, invoice_folder):
 % ################## Personal DATA ##################
 """)
     print(f"Die Datei invoice_template.tex wurde im Ordner {invoice_folder} erstellt.")
+#==========================================================================    
 
+
+#==========================================================================    
 def compile_latex(fileName, tex_file, folder):
     workingFolder = os.getcwd()
 
@@ -100,11 +186,20 @@ def compile_latex(fileName, tex_file, folder):
     subprocess.run(["pdflatex", fileName], check=True)
     print(f"Die Datei {tex_file} wurde erfolgreich kompiliert.")
     os.chdir(workingFolder)
+#==========================================================================    
 
+
+#==========================================================================    
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Generate a PDF invoice from a JSON file using a LaTeX template.")
     parser.add_argument("data", help="The json file containing the data for the current invoice.")
+
+    parser.add_argument("-l", "--latex-cmd", default=DEFAULT_LATEX_COMMAND, 
+                        help="The LaTeX command to use for compilation (default: pdflatex). Alternative: xelatex, lualatex")
+
+    parser.add_argument("-f", "--force", action="store_true",
+                        help="Force overwrite of existing invoice folder.")
     args = parser.parse_args()
 
     # Beispielaufruf
@@ -112,4 +207,4 @@ if __name__ == "__main__":
 
     json_file = args.data
 
-    generate_invoice(json_file)
+    generate_invoice(json_file, args.force, args.latex_cmd)
