@@ -79,7 +79,146 @@ def create_tex_data_file(data, invoice_folder):
     except IOError as e:
         logging.error(f"Failed to write LaTex data file {tex_file_path}: {e}")
         raise
+#==========================================================================    
+
+
+#==========================================================================    
+def compile_latex2(main_tex_file, target_folder, latex_command=DEFAULT_LATEX_COMMAND):
+    """Compiles the main LaTeX file within the target folder."""
+    current_dir = os.getcwd()
+    try:
+        os.chdir(target_folder)
+        logging.info(f"Changed directory to: {target_folder}")
+
+        # Check if LaTeX command exists (basic check)
+        if not shutil.which(latex_command):
+            logging.error(f"LaTeX command '{latex_command}' not found in PATH.")
+            raise FileExistsError(f"LaTeX command '{latex_command}' not found.")
+
+        # Run LaTeX compilation (consider running twice for references/TOC)
+        # Suppress LaTeX output unless errors occur for cleaner logs
+        logging.info(f"Running '{latex_command} {main_tex_file}'...")
+        process = subprocess.run(
+            [latex_command, "-interaction=nonstopmode", main_tex_file],
+            check=False, # Check manually for better error reporting
+            capture_output=True, # Capture stdout/stderr
+            text=True, # Decode output as text
+            encoding='utf-8', # Assume utf-8 output from latex
+            errors='replace' # Add this!
+        )
+
+        if process.returncode != 0:
+            logging.error(f"LaTeX compilation failed (exit code {process.returncode}).")
+            logging.error("--- LaTeX Output ---")
+            logging.error(process.stdout) # Log captured output
+            logging.error("--- End LaTeX Output ---")
+            # Consider also logging stderr if relevant: logging.error(process.stderr)
+            raise subprocess.CalledProcessError(process.returncode, process.args, process.stdout, process.stderr)
+        else:
+            # Optionally run again if needed (e.g., for cross-references, TOC)
+            logging.info("First LaTeX pass successful. Running again for references...")
+            process = subprocess.run(
+                [latex_command, "-interaction=nonstopmode", main_tex_file],
+                check=True, capture_output=True, text=True, encoding='utf-8',errors='replace'
+            )
+            logging.info(f"Successfully compiled {main_tex_file} in {target_folder}") 
+
+    except FileNotFoundError:
+        # Reraise specific error if command not found
+        raise
+    except subprocess.CalledProcessError as e:
+        logging.error(f"LaTeX compilation failed during second pass: {e}")
+        # Optionally log e.stdout again here if needed
+        raise # Reraise the exception
+    except Exception as e:
+        logging.error(f"An unexpected error occurred during LaTeX compilation: {e}")
+        raise
+    finally:
+        # CRITICAL: Always change back to the original directory
+        os.chdir(current_dir)
+        logging.info(f"Returned to directory: {current_dir}")
+
     
+#==========================================================================    
+def generate_invoice(json_file_path, force_overwrite=False, latex_cmd=DEFAULT_LATEX_COMMAND):
+    """Generates an invoice PDF from a JSON data file."""
+    # 1. Validate input JSON path
+    if not os.path.isfile(json_file_path):
+        logging.error(f"Input JSON file not found: {json_file_path}")
+        sys.exit(1) # Exit script if input file is invalid
+
+    # 2. Load JSON data with error handling
+    try:
+        with open(json_file_path, 'r', encoding='utf-8') as f: # Specify encoding
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        logging.error(f"Invalid JSON file {json_file_path}: {e}")
+        sys.exit(1)
+    except IOError as e:
+         logging.error(f"Could not read JSON file {json_file_path}: {e}")
+         sys.exit(1)
+
+    # 3. Validate essential data early
+    if 'invoiceReference' not in data or not data['invoiceReference']:
+        logging.error("JSON data must contain a non-empty 'invoiceReference' key.")
+        sys.exit(1)
+    invoice_ref = data['invoiceReference']
+    invoice_folder = f"invoice-{invoice_ref}"
+    output_pdf_name = f"invoice-{invoice_ref}.pdf" # Define desired output name
+
+    # 4. Handle existing output directory
+    if os.path.exists(invoice_folder):
+        if force_overwrite:
+            logging.warning(f"Folder '{invoice_folder}' exists. Overwriting due to --force flag.")
+            try:
+                shutil.rmtree(invoice_folder)
+            except OSError as e:
+                logging.error(f"Failed to remove existing folder '{invoice_folder}': {e}")
+                sys.exit(1)
+        else:
+            logging.error(f"Output folder '{invoice_folder}' already exists. Use --force to overwrite.")
+            sys.exit(1)
+
+    # 5. Check for template directory
+    if not os.path.isdir(TEMPLATE_DIR):
+        logging.error(f"Template directory '{TEMPLATE_DIR}' not found.")
+        sys.exit(1)
+
+    # 6. Copy template directory
+    try:
+        shutil.copytree(TEMPLATE_DIR, invoice_folder)
+        logging.info(f"Copied template '{TEMPLATE_DIR}' to '{invoice_folder}'")
+    except OSError as e:
+        logging.error(f"Failed to copy template directory: {e}")
+        sys.exit(1) # Exit if template copy fails
+
+    # 7. Create the data file and compile
+    try:
+        create_tex_data_file(data, invoice_folder)
+        compile_latex2(MAIN_TEX_FILE, invoice_folder, latex_cmd)
+
+        # 8. Rename the output PDF
+        generated_pdf = os.path.join(invoice_folder, MAIN_TEX_FILE.replace('.tex', '.pdf'))
+        final_pdf_path = os.path.join(invoice_folder, output_pdf_name)
+        if os.path.exists(generated_pdf):
+            shutil.move(generated_pdf, final_pdf_path)
+            logging.info(f"Successfully generated invoice: {final_pdf_path}")
+        else:
+            logging.warning(f"Expected PDF '{generated_pdf}' not found after compilation.")
+            # Decide if this is an error or just a warning
+
+    except (ValueError, IOError, FileNotFoundError, subprocess.CalledProcessError) as e:
+        # Catch specific errors from previous steps
+        logging.error(f"Invoice generation failed: {e}")
+        # Optional: Clean up the partially created folder?
+        # if os.path.exists(invoice_folder):
+        #     logging.info(f"Cleaning up folder {invoice_folder} due to error.")
+        #     shutil.rmtree(invoice_folder)
+        sys.exit(1) # Exit with error status
+    except Exception as e:
+        # Catch any other unexpected errors
+        logging.error(f"An unexpected error occurred during invoice generation: {e}")
+        sys.exit(1)
 #==========================================================================    
 
 
@@ -190,6 +329,89 @@ def compile_latex(fileName, tex_file, folder):
 
 
 #==========================================================================    
+def generate_invoice2(json_file_path, force_overwrite=False, latex_cmd=DEFAULT_LATEX_COMMAND):
+    """Generates an invoice PDF from a JSON data file."""
+    # 1. Validate input JSON path
+    if not os.path.isfile(json_file_path):
+        logging.error(f"Input JSON file not found: {json_file_path}")
+        sys.exit(1) # Exit script if input file is invalid
+
+    # 2. Load JSON data with error handling
+    try:
+        with open(json_file_path, 'r', encoding='utf-8') as f: # Specify encoding
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        logging.error(f"Invalid JSON file {json_file_path}: {e}")
+        sys.exit(1)
+    except IOError as e:
+         logging.error(f"Could not read JSON file {json_file_path}: {e}")
+         sys.exit(1)
+
+    # 3. Validate essential data early
+    if 'invoiceReference' not in data or not data['invoiceReference']:
+        logging.error("JSON data must contain a non-empty 'invoiceReference' key.")
+        sys.exit(1)
+    invoice_ref = data['invoiceReference']
+    invoice_folder = f"invoice-{invoice_ref}"
+    output_pdf_name = f"invoice-{invoice_ref}.pdf" # Define desired output name
+
+    # 4. Handle existing output directory
+    if os.path.exists(invoice_folder):
+        if force_overwrite:
+            logging.warning(f"Folder '{invoice_folder}' exists. Overwriting due to --force flag.")
+            try:
+                shutil.rmtree(invoice_folder)
+            except OSError as e:
+                logging.error(f"Failed to remove existing folder '{invoice_folder}': {e}")
+                sys.exit(1)
+        else:
+            logging.error(f"Output folder '{invoice_folder}' already exists. Use --force to overwrite.")
+            sys.exit(1)
+
+    # 5. Check for template directory
+    if not os.path.isdir(TEMPLATE_DIR):
+        logging.error(f"Template directory '{TEMPLATE_DIR}' not found.")
+        sys.exit(1)
+
+    # 6. Copy template directory
+    try:
+        shutil.copytree(TEMPLATE_DIR, invoice_folder)
+        logging.info(f"Copied template '{TEMPLATE_DIR}' to '{invoice_folder}'")
+    except OSError as e:
+        logging.error(f"Failed to copy template directory: {e}")
+        sys.exit(1) # Exit if template copy fails
+
+    # 7. Create the data file and compile
+    try:
+        create_tex_data_file(data, invoice_folder)
+        compile_latex2(MAIN_TEX_FILE, invoice_folder, latex_cmd)
+
+        # 8. Rename the output PDF
+        generated_pdf = os.path.join(invoice_folder, MAIN_TEX_FILE.replace('.tex', '.pdf'))
+        final_pdf_path = os.path.join(invoice_folder, output_pdf_name)
+        if os.path.exists(generated_pdf):
+            shutil.move(generated_pdf, final_pdf_path)
+            logging.info(f"Successfully generated invoice: {final_pdf_path}")
+        else:
+            logging.warning(f"Expected PDF '{generated_pdf}' not found after compilation.")
+            # Decide if this is an error or just a warning
+
+    except (ValueError, IOError, FileNotFoundError, subprocess.CalledProcessError) as e:
+        # Catch specific errors from previous steps
+        logging.error(f"Invoice generation failed: {e}")
+        # Optional: Clean up the partially created folder?
+        # if os.path.exists(invoice_folder):
+        #     logging.info(f"Cleaning up folder {invoice_folder} due to error.")
+        #     shutil.rmtree(invoice_folder)
+        sys.exit(1) # Exit with error status
+    except Exception as e:
+        # Catch any other unexpected errors
+        logging.error(f"An unexpected error occurred during invoice generation: {e}")
+        sys.exit(1)
+#==========================================================================    
+
+
+#==========================================================================    
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Generate a PDF invoice from a JSON file using a LaTeX template.")
@@ -207,4 +429,4 @@ if __name__ == "__main__":
 
     json_file = args.data
 
-    generate_invoice(json_file, args.force, args.latex_cmd)
+    generate_invoice2(json_file, args.force, args.latex_cmd)
